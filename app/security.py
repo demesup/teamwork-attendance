@@ -25,12 +25,15 @@ def verify_password(value: str, hashed: str) -> bool:
     return password_hash.verify(value, hashed)
 
 
+CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
 def make_code() -> str:
-    return secrets.token_urlsafe(8).replace("-", "").replace("_", "").upper()[:10]
+    return "".join(secrets.choice(CODE_ALPHABET) for _ in range(6))
 
 
 def digest_code(code: str) -> str:
-    return hmac_new(get_settings().code_secret.encode(), code.encode(), sha256).hexdigest()
+    return hmac_new(get_settings().code_secret.encode(), code.strip().upper().encode(), sha256).hexdigest()
 
 
 def code_matches(code: str, expected: str) -> bool:

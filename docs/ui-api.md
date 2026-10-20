@@ -140,3 +140,22 @@ Refresh after opening/closing a session rather than polling aggressively.
 - Do not log codes, QR tokens, passwords, or bearer tokens.
 - The development registration endpoint must be replaced with an administrator
   or institutional-SSO flow before production.
+
+## Endpoints used by the web app
+
+In addition to the endpoints above, the web app uses:
+
+| Purpose | Endpoint |
+|---|---|
+| Current user | `GET /api/v1/auth/me` |
+| List my sections (professor: owned, student: enrolled) | `GET /api/v1/sections` |
+| Enrolled students of a section | `GET /api/v1/sections/{id}/students` |
+| Enroll by email | `POST /api/v1/sections/{id}/enrollments` with `{ "student_email": "…" }` |
+| List sessions (`?open=true`, `?section_id=`) | `GET /api/v1/attendance-sessions` |
+| Live check-ins for a session | `GET /api/v1/attendance-sessions/{id}/records` |
+| Issue a new code (old code and QR stop working) | `POST /api/v1/attendance-sessions/{id}/rotate-code` |
+| End a session normally | `POST /api/v1/attendance-sessions/{id}/close` |
+| Confirm with only the 6-character code | `POST /api/v1/attendance/confirm` with `{ "code": "…" }` |
+
+Codes are only returned when a session is opened or its code is rotated; they are
+stored hashed, so after a page reload the professor UI issues a fresh code.

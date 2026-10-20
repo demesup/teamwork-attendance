@@ -61,6 +61,7 @@ class AttendanceSession(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     section_id: Mapped[str] = mapped_column(ForeignKey("course_sections.id"), index=True)
     opened_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    title: Mapped[str | None] = mapped_column(String(200))
     session_date: Mapped[date] = mapped_column(Date)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

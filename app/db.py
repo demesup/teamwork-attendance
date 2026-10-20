@@ -28,6 +28,7 @@ def ensure_additive_schema() -> None:
     """Add columns introduced after the initial development database was created."""
     additions = {
         "attendance_sessions": {
+            "title": "VARCHAR(200)",
             "location_latitude": "FLOAT",
             "location_longitude": "FLOAT",
             "allowed_radius_meters": "INTEGER",

@@ -2,9 +2,10 @@ from datetime import date, datetime, timedelta, timezone
 from math import asin, cos, radians, sin, sqrt
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -23,10 +24,13 @@ from .models import (
     User,
 )
 from .schemas import (
+    AttendanceCodeConfirmRequest,
     AttendanceConfirmRequest,
+    AttendanceRecordRow,
     AttendanceResponse,
     AttendanceSessionCreate,
     AttendanceSessionResponse,
+    AttendanceSessionSummary,
     AbsenceRequestCreate,
     AbsenceRequestResponse,
     AbsenceReview,
@@ -34,12 +38,14 @@ from .schemas import (
     EnrollmentCreate,
     SectionCreate,
     SectionResponse,
+    SectionSummary,
     StudentStatsResponse,
     NotificationResponse,
     TokenResponse,
     UserCreate,
     UserResponse,
 )
+from .seed import seed_demo_data
 from .security import (
     code_matches,
     create_token,
@@ -58,6 +64,18 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origin.strip() for origin in get_settings().cors_origins.split(",") if origin.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def as_utc(value: datetime) -> datetime:
+    """SQLite drops tzinfo on round-trip; treat naive values as UTC."""
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def distance_meters(latitude_a: float, longitude_a: float, latitude_b: float, longitude_b: float) -> float:
@@ -72,6 +90,8 @@ def distance_meters(latitude_a: float, longitude_a: float, latitude_b: float, lo
 def create_tables() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_additive_schema()
+    if get_settings().seed_demo_data:
+        seed_demo_data()
 
 
 @app.get("/health", tags=["system"])
@@ -104,6 +124,75 @@ def token(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
     return TokenResponse(access_token=create_token(user))
 
 
+@app.get("/api/v1/auth/me", response_model=UserResponse, tags=["auth"])
+def me(user: User = Depends(current_user)) -> User:
+    return user
+
+
+@app.get("/api/v1/sections", response_model=list[SectionSummary], tags=["sections"])
+def list_sections(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[SectionSummary]:
+    if user.role == "professor":
+        sections = db.scalars(
+            select(CourseSection).where(CourseSection.professor_id == user.id).order_by(CourseSection.name)
+        ).all()
+    else:
+        sections = db.scalars(
+            select(CourseSection)
+            .join(Enrollment, Enrollment.section_id == CourseSection.id)
+            .where(Enrollment.student_id == user.id, Enrollment.status == "active")
+            .order_by(CourseSection.name)
+        ).all()
+    result = []
+    for section in sections:
+        enrolled = db.scalar(
+            select(func.count()).select_from(Enrollment).where(
+                Enrollment.section_id == section.id, Enrollment.status == "active"
+            )
+        )
+        total_sessions = db.scalar(
+            select(func.count()).select_from(AttendanceSession).where(
+                AttendanceSession.section_id == section.id, AttendanceSession.status != SessionStatus.CANCELLED
+            )
+        )
+        attended = None
+        if user.role == "student":
+            attended = db.scalar(
+                select(func.count())
+                .select_from(AttendanceRecord)
+                .join(AttendanceSession)
+                .where(AttendanceSession.section_id == section.id, AttendanceRecord.student_id == user.id)
+            )
+        result.append(
+            SectionSummary(
+                id=section.id,
+                name=section.name,
+                professor_id=section.professor_id,
+                professor_name=f"{section.professor.first_name} {section.professor.last_name}",
+                enrolled_students=enrolled or 0,
+                total_sessions=total_sessions or 0,
+                attended_sessions=attended,
+            )
+        )
+    return result
+
+
+@app.get("/api/v1/sections/{section_id}/students", response_model=list[UserResponse], tags=["professor"])
+def section_students(
+    section_id: str,
+    professor: User = Depends(require_role("professor")),
+    db: Session = Depends(get_db),
+) -> list[User]:
+    section = db.get(CourseSection, section_id)
+    if section is None or section.professor_id != professor.id:
+        raise HTTPException(status_code=404, detail="Section not found")
+    return db.scalars(
+        select(User)
+        .join(Enrollment, Enrollment.student_id == User.id)
+        .where(Enrollment.section_id == section_id, Enrollment.status == "active")
+        .order_by(User.last_name, User.first_name)
+    ).all()
+
+
 @app.post("/api/v1/sections", response_model=SectionResponse, status_code=201, tags=["professor"])
 def create_section(
     payload: SectionCreate,
@@ -125,7 +214,12 @@ def enroll_student(
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     section = db.get(CourseSection, section_id)
-    student = db.get(User, payload.student_id)
+    if payload.student_id:
+        student = db.get(User, payload.student_id)
+    elif payload.student_email:
+        student = db.scalar(select(User).where(User.email == payload.student_email.lower()))
+    else:
+        raise HTTPException(status_code=422, detail="Provide student_id or student_email")
     if section is None or section.professor_id != professor.id:
         raise HTTPException(status_code=404, detail="Section not found")
     if student is None or student.role != "student":
@@ -162,6 +256,7 @@ def open_attendance(
     session = AttendanceSession(
         section_id=section.id,
         opened_by=professor.id,
+        title=payload.title,
         session_date=date.today(),
         expires_at=expires_at,
         code_hash=digest_code(code),
@@ -172,6 +267,11 @@ def open_attendance(
     db.add(session)
     db.commit()
     db.refresh(session)
+    return session_credentials(session, code)
+
+
+def session_credentials(session: AttendanceSession, code: str) -> AttendanceSessionResponse:
+    expires_at = as_utc(session.expires_at)
     qr_token = jwt.encode(
         {"session_id": session.id, "code_version": session.code_version, "exp": expires_at},
         get_settings().code_secret,
@@ -180,6 +280,7 @@ def open_attendance(
     return AttendanceSessionResponse(
         id=session.id,
         section_id=session.section_id,
+        title=session.title,
         expires_at=expires_at,
         code=code,
         qr_token=qr_token,
@@ -187,19 +288,141 @@ def open_attendance(
     )
 
 
-@app.post("/api/v1/attendance-sessions/{session_id}/confirm", response_model=AttendanceResponse, tags=["student"])
-def confirm_attendance(
-    session_id: str,
-    payload: AttendanceConfirmRequest,
-    student: User = Depends(require_role("student")),
+def session_summary(db: Session, session: AttendanceSession) -> AttendanceSessionSummary:
+    section = db.get(CourseSection, session.section_id)
+    confirmed = db.scalar(
+        select(func.count()).select_from(AttendanceRecord).where(AttendanceRecord.attendance_session_id == session.id)
+    )
+    enrolled = db.scalar(
+        select(func.count()).select_from(Enrollment).where(
+            Enrollment.section_id == session.section_id, Enrollment.status == "active"
+        )
+    )
+    expires_at = as_utc(session.expires_at)
+    status_value = session.status
+    if status_value == SessionStatus.OPEN and datetime.now(timezone.utc) >= expires_at:
+        status_value = SessionStatus.CLOSED
+    return AttendanceSessionSummary(
+        id=session.id,
+        section_id=session.section_id,
+        section_name=section.name if section else "",
+        title=session.title,
+        status=status_value,
+        session_date=session.session_date,
+        starts_at=as_utc(session.starts_at),
+        expires_at=expires_at,
+        location_required=session.location_latitude is not None,
+        confirmed_count=confirmed or 0,
+        enrolled_count=enrolled or 0,
+    )
+
+
+@app.get("/api/v1/attendance-sessions", response_model=list[AttendanceSessionSummary], tags=["sessions"])
+def list_attendance_sessions(
+    section_id: str | None = None,
+    open_only: bool = Query(default=False, alias="open"),
+    user: User = Depends(current_user),
     db: Session = Depends(get_db),
-) -> AttendanceResponse:
-    if not payload.code and not payload.qr_token:
-        raise HTTPException(status_code=422, detail="Provide code or qr_token")
+) -> list[AttendanceSessionSummary]:
+    query = select(AttendanceSession).join(CourseSection, CourseSection.id == AttendanceSession.section_id)
+    if user.role == "professor":
+        query = query.where(CourseSection.professor_id == user.id)
+    else:
+        query = query.join(Enrollment, Enrollment.section_id == CourseSection.id).where(
+            Enrollment.student_id == user.id, Enrollment.status == "active"
+        )
+    if section_id:
+        query = query.where(AttendanceSession.section_id == section_id)
+    if open_only:
+        query = query.where(
+            AttendanceSession.status == SessionStatus.OPEN,
+            AttendanceSession.expires_at > datetime.now(timezone.utc),
+        )
+    sessions = db.scalars(query.order_by(AttendanceSession.starts_at.desc()).limit(200)).all()
+    return [session_summary(db, session) for session in sessions]
+
+
+def owned_session(db: Session, session_id: str, professor: User) -> AttendanceSession:
     session = db.get(AttendanceSession, session_id)
-    if session is None or session.status != SessionStatus.OPEN:
+    if session is None or session.opened_by != professor.id:
+        raise HTTPException(status_code=404, detail="Attendance session not found")
+    return session
+
+
+@app.get(
+    "/api/v1/attendance-sessions/{session_id}/records",
+    response_model=list[AttendanceRecordRow],
+    tags=["professor"],
+)
+def session_records(
+    session_id: str,
+    professor: User = Depends(require_role("professor")),
+    db: Session = Depends(get_db),
+) -> list[AttendanceRecordRow]:
+    session = owned_session(db, session_id, professor)
+    rows = db.execute(
+        select(AttendanceRecord, User)
+        .join(User, User.id == AttendanceRecord.student_id)
+        .where(AttendanceRecord.attendance_session_id == session.id)
+        .order_by(AttendanceRecord.confirmed_at)
+    ).all()
+    return [
+        AttendanceRecordRow(
+            id=record.id,
+            student_id=student.id,
+            first_name=student.first_name,
+            last_name=student.last_name,
+            email=student.email,
+            status=record.status,
+            confirmation_method=record.confirmation_method,
+            confirmed_at=as_utc(record.confirmed_at),
+        )
+        for record, student in rows
+    ]
+
+
+@app.post(
+    "/api/v1/attendance-sessions/{session_id}/rotate-code",
+    response_model=AttendanceSessionResponse,
+    tags=["professor"],
+)
+def rotate_code(
+    session_id: str,
+    professor: User = Depends(require_role("professor")),
+    db: Session = Depends(get_db),
+) -> AttendanceSessionResponse:
+    """Issue a fresh code (e.g. after a page reload); the previous code and QR stop working."""
+    session = owned_session(db, session_id, professor)
+    if session.status != SessionStatus.OPEN or datetime.now(timezone.utc) >= as_utc(session.expires_at):
+        raise HTTPException(status_code=409, detail="Attendance session is not open")
+    code = make_code()
+    session.code_hash = digest_code(code)
+    session.code_version += 1
+    db.add(AuditLog(actor_id=professor.id, action="attendance_code_rotated", entity_type="attendance_session", entity_id=session.id))
+    db.commit()
+    db.refresh(session)
+    return session_credentials(session, code)
+
+
+@app.post("/api/v1/attendance-sessions/{session_id}/close", tags=["professor"])
+def close_attendance(
+    session_id: str,
+    professor: User = Depends(require_role("professor")),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    session = owned_session(db, session_id, professor)
+    if session.status != SessionStatus.OPEN:
+        raise HTTPException(status_code=409, detail="Attendance session is already closed")
+    session.status = SessionStatus.CLOSED
+    db.add(AuditLog(actor_id=professor.id, action="attendance_closed", entity_type="attendance_session", entity_id=session.id))
+    db.commit()
+    return {"status": "closed"}
+
+
+def ensure_can_confirm(db: Session, session: AttendanceSession, student: User) -> None:
+    if session.status != SessionStatus.OPEN:
         raise HTTPException(status_code=404, detail="Attendance session is not open")
-    if datetime.now(timezone.utc) >= session.expires_at:
+    if datetime.now(timezone.utc) >= as_utc(session.expires_at):
         raise HTTPException(status_code=410, detail="Attendance session has expired")
     enrollment = db.scalar(
         select(Enrollment).where(
@@ -212,6 +435,92 @@ def confirm_attendance(
         db.add(CodeAttempt(attendance_session_id=session.id, student_id=student.id, result="not_enrolled"))
         db.commit()
         raise HTTPException(status_code=403, detail="Student is not enrolled")
+
+
+def record_attendance(
+    db: Session,
+    session: AttendanceSession,
+    student: User,
+    method: str,
+    latitude: float | None,
+    longitude: float | None,
+) -> AttendanceResponse:
+    location_required = session.location_latitude is not None
+    if location_required and (latitude is None or longitude is None):
+        raise HTTPException(status_code=422, detail="Location is required for this attendance session")
+    if location_required and distance_meters(
+        session.location_latitude,
+        session.location_longitude,
+        latitude,
+        longitude,
+    ) > session.allowed_radius_meters:
+        raise HTTPException(status_code=403, detail="You are outside the attendance location")
+    record = AttendanceRecord(
+        attendance_session_id=session.id,
+        student_id=student.id,
+        confirmation_method=method,
+        latitude=latitude,
+        longitude=longitude,
+    )
+    db.add(record)
+    db.add(CodeAttempt(attendance_session_id=session.id, student_id=student.id, result="accepted"))
+    db.add(AuditLog(actor_id=student.id, action="attendance_confirmed", entity_type="attendance_session", entity_id=session.id))
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Attendance already confirmed") from exc
+    db.refresh(record)
+    section = db.get(CourseSection, session.section_id)
+    return AttendanceResponse(
+        id=record.id,
+        session_id=record.attendance_session_id,
+        section_name=section.name if section else "",
+        title=session.title,
+        status=record.status,
+        confirmation_method=record.confirmation_method,
+        confirmed_at=as_utc(record.confirmed_at),
+    )
+
+
+@app.post("/api/v1/attendance/confirm", response_model=AttendanceResponse, tags=["student"])
+def confirm_attendance_by_code(
+    payload: AttendanceCodeConfirmRequest,
+    student: User = Depends(require_role("student")),
+    db: Session = Depends(get_db),
+) -> AttendanceResponse:
+    """Confirm with only the code shown in class; the open session is looked up from the code."""
+    candidates = db.scalars(
+        select(AttendanceSession).where(
+            AttendanceSession.code_hash == digest_code(payload.code),
+            AttendanceSession.status == SessionStatus.OPEN,
+        )
+    ).all()
+    if not candidates:
+        raise HTTPException(status_code=400, detail="Invalid attendance code")
+    enrolled_section_ids = set(
+        db.scalars(
+            select(Enrollment.section_id).where(Enrollment.student_id == student.id, Enrollment.status == "active")
+        ).all()
+    )
+    session = next((c for c in candidates if c.section_id in enrolled_section_ids), candidates[0])
+    ensure_can_confirm(db, session, student)
+    return record_attendance(db, session, student, "code", payload.latitude, payload.longitude)
+
+
+@app.post("/api/v1/attendance-sessions/{session_id}/confirm", response_model=AttendanceResponse, tags=["student"])
+def confirm_attendance(
+    session_id: str,
+    payload: AttendanceConfirmRequest,
+    student: User = Depends(require_role("student")),
+    db: Session = Depends(get_db),
+) -> AttendanceResponse:
+    if not payload.code and not payload.qr_token:
+        raise HTTPException(status_code=422, detail="Provide code or qr_token")
+    session = db.get(AttendanceSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Attendance session is not open")
+    ensure_can_confirm(db, session, student)
     method = "code"
     valid = bool(payload.code and code_matches(payload.code, session.code_hash))
     if payload.qr_token:
@@ -227,39 +536,7 @@ def confirm_attendance(
         db.add(CodeAttempt(attendance_session_id=session.id, student_id=student.id, result="invalid"))
         db.commit()
         raise HTTPException(status_code=400, detail="Invalid attendance code or QR")
-    location_required = session.location_latitude is not None
-    if location_required and (payload.latitude is None or payload.longitude is None):
-        raise HTTPException(status_code=422, detail="Location is required for this attendance session")
-    if location_required and distance_meters(
-        session.location_latitude,
-        session.location_longitude,
-        payload.latitude,
-        payload.longitude,
-    ) > session.allowed_radius_meters:
-        raise HTTPException(status_code=403, detail="You are outside the attendance location")
-    record = AttendanceRecord(
-        attendance_session_id=session.id,
-        student_id=student.id,
-        confirmation_method=method,
-        latitude=payload.latitude,
-        longitude=payload.longitude,
-    )
-    db.add(record)
-    db.add(CodeAttempt(attendance_session_id=session.id, student_id=student.id, result="accepted"))
-    db.add(AuditLog(actor_id=student.id, action="attendance_confirmed", entity_type="attendance_session", entity_id=session.id))
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Attendance already confirmed") from exc
-    db.refresh(record)
-    return AttendanceResponse(
-        id=record.id,
-        session_id=record.attendance_session_id,
-        status=record.status,
-        confirmation_method=record.confirmation_method,
-        confirmed_at=record.confirmed_at,
-    )
+    return record_attendance(db, session, student, method, payload.latitude, payload.longitude)
 
 
 @app.post("/api/v1/attendance-sessions/{session_id}/cancel", tags=["professor"])
@@ -268,9 +545,7 @@ def cancel_attendance(
     professor: User = Depends(require_role("professor")),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
-    session = db.get(AttendanceSession, session_id)
-    if session is None or session.opened_by != professor.id:
-        raise HTTPException(status_code=404, detail="Attendance session not found")
+    session = owned_session(db, session_id, professor)
     if session.status != SessionStatus.OPEN:
         raise HTTPException(status_code=409, detail="Attendance session is already closed")
     session.status = SessionStatus.CANCELLED
@@ -387,20 +662,37 @@ def student_statistics(
     sessions = db.scalars(
         select(AttendanceSession)
         .join(Enrollment, Enrollment.section_id == AttendanceSession.section_id)
-        .where(Enrollment.student_id == student.id, Enrollment.status == "active")
-        .order_by(AttendanceSession.session_date)
+        .where(
+            Enrollment.student_id == student.id,
+            Enrollment.status == "active",
+            AttendanceSession.status != SessionStatus.CANCELLED,
+        )
+        .order_by(AttendanceSession.starts_at.desc())
     ).all()
+    section_names = {
+        section.id: section.name
+        for section in db.scalars(
+            select(CourseSection).where(CourseSection.id.in_({session.section_id for session in sessions}))
+        ).all()
+    }
     records = {
         record.attendance_session_id: record
         for record in db.scalars(select(AttendanceRecord).where(AttendanceRecord.student_id == student.id)).all()
     }
+    session_ids = {session.id for session in sessions}
+    records = {session_id: record for session_id, record in records.items() if session_id in session_ids}
     present = sum(1 for record in records.values() if record.status == "present")
     late = sum(1 for record in records.values() if record.status == "late")
     by_session = [
         {
             "session_id": session.id,
+            "section_id": session.section_id,
+            "section_name": section_names.get(session.section_id, ""),
+            "title": session.title,
             "date": session.session_date.isoformat(),
+            "starts_at": as_utc(session.starts_at).isoformat(),
             "status": records[session.id].status if session.id in records else "absent",
+            "confirmed_at": as_utc(records[session.id].confirmed_at).isoformat() if session.id in records else None,
         }
         for session in sessions
     ]
@@ -429,14 +721,16 @@ def class_statistics(
         raise HTTPException(status_code=404, detail="Section not found")
     sessions = db.scalars(
         select(AttendanceSession)
-        .where(AttendanceSession.section_id == section_id)
+        .where(AttendanceSession.section_id == section_id, AttendanceSession.status != SessionStatus.CANCELLED)
         .order_by(AttendanceSession.session_date)
     ).all()
     enrolled_count = len(
         db.scalars(select(Enrollment).where(Enrollment.section_id == section_id, Enrollment.status == "active")).all()
     )
     records = db.scalars(
-        select(AttendanceRecord).join(AttendanceSession).where(AttendanceSession.section_id == section_id)
+        select(AttendanceRecord)
+        .join(AttendanceSession)
+        .where(AttendanceSession.section_id == section_id, AttendanceSession.status != SessionStatus.CANCELLED)
     ).all()
     records_by_session: dict[str, int] = {}
     for record in records:

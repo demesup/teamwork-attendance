@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -35,8 +35,16 @@ class SectionResponse(SectionCreate):
     professor_id: str
 
 
+class SectionSummary(SectionResponse):
+    professor_name: str
+    enrolled_students: int
+    total_sessions: int
+    attended_sessions: int | None = None
+
+
 class AttendanceSessionCreate(BaseModel):
     section_id: str
+    title: str | None = Field(default=None, max_length=200)
     duration_minutes: int = Field(default=15, ge=1, le=120)
     location_latitude: float | None = Field(default=None, ge=-90, le=90)
     location_longitude: float | None = Field(default=None, ge=-180, le=180)
@@ -46,10 +54,42 @@ class AttendanceSessionCreate(BaseModel):
 class AttendanceSessionResponse(BaseModel):
     id: str
     section_id: str
+    title: str | None
     expires_at: datetime
     code: str
     qr_token: str
     location_required: bool
+
+
+class AttendanceSessionSummary(BaseModel):
+    id: str
+    section_id: str
+    section_name: str
+    title: str | None
+    status: str
+    session_date: date
+    starts_at: datetime
+    expires_at: datetime
+    location_required: bool
+    confirmed_count: int
+    enrolled_count: int
+
+
+class AttendanceRecordRow(BaseModel):
+    id: str
+    student_id: str
+    first_name: str
+    last_name: str
+    email: str
+    status: str
+    confirmation_method: str
+    confirmed_at: datetime
+
+
+class AttendanceCodeConfirmRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=64)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
 
 
 class AttendanceConfirmRequest(BaseModel):
@@ -62,13 +102,16 @@ class AttendanceConfirmRequest(BaseModel):
 class AttendanceResponse(BaseModel):
     id: str
     session_id: str
+    section_name: str
+    title: str | None
     status: str
     confirmation_method: str
     confirmed_at: datetime
 
 
 class EnrollmentCreate(BaseModel):
-    student_id: str
+    student_id: str | None = None
+    student_email: EmailStr | None = None
 
 
 class StudentStatsResponse(BaseModel):
