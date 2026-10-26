@@ -24,9 +24,13 @@ def test_distance_is_symmetric():
 
 def test_make_code_format():
     codes = [make_code() for _ in range(2000)]
-    assert all(re.fullmatch(r"[A-Z0-9]{1,10}", code) for code in codes)
-    assert max(len(code) for code in codes) == 10
+    assert all(re.fullmatch(r"[A-Z0-9]{10}", code) for code in codes)
     assert len(set(codes)) == len(codes)
+
+
+def test_make_code_avoids_look_alike_characters():
+    codes = "".join(make_code() for _ in range(500))
+    assert not set(codes) & set("0O1IL5S")
 
 
 def test_make_code_has_no_lowercase_or_separators():

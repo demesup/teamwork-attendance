@@ -1,6 +1,7 @@
 """Shared helpers for building users, sections, and attendance sessions in tests."""
 
 PASSWORD = "correct-horse-battery"
+PROFESSOR_CODE = "test-professor-code"
 
 
 def make_actor(client, email: str, role: str) -> dict:
@@ -13,6 +14,7 @@ def make_actor(client, email: str, role: str) -> dict:
             "first_name": "Test",
             "last_name": role.title(),
             "role": role,
+            "professor_code": PROFESSOR_CODE if role == "professor" else None,
         },
     )
     assert response.status_code == 201, response.text

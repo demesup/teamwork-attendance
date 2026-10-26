@@ -31,6 +31,16 @@ def ensure_additive_schema() -> None:
             "location_latitude": "FLOAT",
             "location_longitude": "FLOAT",
             "allowed_radius_meters": "INTEGER",
+            "late_after_minutes": "INTEGER",
+        },
+        "enrollments": {
+            "enrolled_at": "TIMESTAMP WITH TIME ZONE",
+            "ended_at": "TIMESTAMP WITH TIME ZONE",
+        },
+        "absence_requests": {
+            "attachment_path": "VARCHAR(64)",
+            "attachment_name": "VARCHAR(255)",
+            "attachment_type": "VARCHAR(50)",
         },
         "attendance_records": {
             "latitude": "FLOAT",

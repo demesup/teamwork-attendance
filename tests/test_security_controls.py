@@ -82,7 +82,7 @@ def test_qr_token_with_forged_signature_is_rejected(client, professor, section, 
     body = open_session(client, professor, section)
     forged = jwt.encode(
         {"session_id": body["id"], "code_version": 1, "nonce": "forged", "exp": datetime.now(timezone.utc) + timedelta(minutes=5)},
-        "not-the-real-secret",
+        "not-the-real-secret-0123456789abcdef012345",
         algorithm="HS256",
     )
     assert confirm(client, student, body["id"], qr_token=forged).status_code == 400

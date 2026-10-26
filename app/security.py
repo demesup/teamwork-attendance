@@ -4,7 +4,7 @@ from hmac import compare_digest, new as hmac_new
 import secrets
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from pwdlib import PasswordHash
 from sqlalchemy.orm import Session
@@ -14,7 +14,9 @@ from .db import get_db
 from .models import User
 
 password_hash = PasswordHash.recommended()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token", auto_error=False)
+# The browser UI keeps its token in this HTTP-only cookie instead of script-readable storage.
+SESSION_COOKIE = "attendance_session"
 
 
 def hash_password(value: str) -> str:
@@ -25,12 +27,22 @@ def verify_password(value: str, hashed: str) -> bool:
     return password_hash.verify(value, hashed)
 
 
+# No 0/O, 1/I/L, or 5/S, so a code read off a projector can't be mistyped.
+CODE_ALPHABET = "ABCDEFGHJKMNPQRTUVWXYZ2346789"
+CODE_LENGTH = 10
+
+
 def make_code() -> str:
-    return secrets.token_urlsafe(8).replace("-", "").replace("_", "").upper()[:10]
+    return "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
+
+
+def normalize_code(code: str) -> str:
+    """Students may type lowercase, spaces, or dashes (the board shows the code in two groups)."""
+    return "".join(character for character in code.upper() if character.isalnum())
 
 
 def digest_code(code: str) -> str:
-    return hmac_new(get_settings().code_secret.encode(), code.encode(), sha256).hexdigest()
+    return hmac_new(get_settings().code_secret.encode(), normalize_code(code).encode(), sha256).hexdigest()
 
 
 def code_matches(code: str, expected: str) -> bool:
@@ -56,8 +68,16 @@ def create_token(user: User) -> str:
     return jwt.encode({"sub": user.id, "role": user.role, "exp": expires}, get_settings().jwt_secret, algorithm="HS256")
 
 
-def current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+def current_user(
+    request: Request,
+    token: str | None = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    """Authenticate from the Authorization header, or from the session cookie set by the browser login."""
     credentials_error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication")
+    token = token or request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise credentials_error
     try:
         payload = jwt.decode(token, get_settings().jwt_secret, algorithms=["HS256"])
         user_id = payload.get("sub")

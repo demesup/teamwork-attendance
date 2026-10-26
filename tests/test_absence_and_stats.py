@@ -1,7 +1,5 @@
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 from app.models import AttendanceSession
 from tests.helpers import confirm, create_section, open_session
 
@@ -86,8 +84,10 @@ def test_professor_lists_requests_for_their_section(client, professor, student, 
 
 def test_student_statistics_reflect_attendance(client, professor, student, section):
     first = open_session(client, professor, section)
-    open_session(client, professor, section)
+    missed = open_session(client, professor, section)
     confirm(client, student, first["id"], code=first["code"])
+    # The missed session must end before it counts as an absence.
+    client.post(f"/api/v1/attendance-sessions/{missed['id']}/close", headers=professor["headers"])
 
     stats = client.get("/api/v1/students/me/statistics", headers=student["headers"]).json()
     assert stats["total_sessions"] == 2
@@ -102,9 +102,18 @@ def test_student_with_no_sessions_has_zero_percent(client, student):
     assert stats["total_sessions"] == 0
 
 
+def test_cancelled_session_is_not_counted_in_class_statistics(client, professor, student, section):
+    session = open_session(client, professor, section)
+    client.post(f"/api/v1/attendance-sessions/{session['id']}/cancel", headers=professor["headers"])
+    stats = client.get(f"/api/v1/sections/{section}/statistics", headers=professor["headers"]).json()
+    assert stats["total_sessions"] == 0
+
+
 def test_class_statistics_count_confirmations(client, professor, student, other_student, section):
     session = open_session(client, professor, section)
     confirm(client, student, session["id"], code=session["code"])
+    # Class statistics only include sessions that have finished.
+    client.post(f"/api/v1/attendance-sessions/{session['id']}/close", headers=professor["headers"])
     stats = client.get(f"/api/v1/sections/{section}/statistics", headers=professor["headers"]).json()
     assert stats["enrolled_students"] == 2
     assert stats["total_confirmations"] == 1
@@ -117,10 +126,6 @@ def test_class_statistics_only_for_owner(client, other_professor, section):
     assert response.status_code == 404
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known gap: cancelled sessions are still counted as absent in student statistics",
-)
 def test_cancelled_session_is_not_counted_as_absence(client, professor, student, section):
     session = open_session(client, professor, section)
     client.post(f"/api/v1/attendance-sessions/{session['id']}/cancel", headers=professor["headers"])

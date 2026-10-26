@@ -5,8 +5,10 @@ from pathlib import Path
 # Must run before `app` is imported: settings are read at import time.
 _test_dir = Path(tempfile.mkdtemp(prefix="attendance-tests-"))
 os.environ["DATABASE_URL"] = f"sqlite:///{_test_dir.as_posix()}/test.db"
-os.environ["JWT_SECRET"] = "test-jwt-secret"
-os.environ["CODE_SECRET"] = "test-code-secret"
+os.environ["JWT_SECRET"] = "test-jwt-secret-0123456789abcdef0123456789"
+os.environ["CODE_SECRET"] = "test-code-secret-0123456789abcdef012345678"
+os.environ["PROFESSOR_SIGNUP_CODE"] = "test-professor-code"
+os.environ["UPLOAD_DIR"] = f"{_test_dir.as_posix()}/uploads"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

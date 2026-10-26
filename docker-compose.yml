@@ -17,9 +17,14 @@ services:
     build: .
     environment:
       DATABASE_URL: postgresql+psycopg://attendance:attendance-dev-only@db:5432/attendance
-      JWT_SECRET: change-this-in-production
-      CODE_SECRET: change-this-in-production
+      JWT_SECRET: dev-only-jwt-secret-not-for-production-7f3a9c
+      CODE_SECRET: dev-only-code-secret-not-for-production-b81e4d
       ACCESS_TOKEN_MINUTES: 30
+      # Development only. Give this to professors so they can create accounts; change it for any real deployment.
+      PROFESSOR_SIGNUP_CODE: professor-dev-only
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
     ports:
       - "8000:8000"
     depends_on:
@@ -28,3 +33,4 @@ services:
 
 volumes:
   postgres_data:
+  uploads:

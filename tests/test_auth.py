@@ -1,11 +1,18 @@
 from app.models import User
-from tests.helpers import PASSWORD
+from tests.helpers import PASSWORD, PROFESSOR_CODE
 
 
-def register(client, email="new@example.com", role="student", password=PASSWORD):
+def register(client, email="new@example.com", role="student", password=PASSWORD, professor_code=PROFESSOR_CODE):
     return client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": password, "first_name": "A", "last_name": "B", "role": role},
+        json={
+            "email": email,
+            "password": password,
+            "first_name": "A",
+            "last_name": "B",
+            "role": role,
+            "professor_code": professor_code,
+        },
     )
 
 
@@ -79,7 +86,7 @@ def test_protected_endpoint_rejects_garbage_token(client):
 def test_token_signed_with_other_secret_is_rejected(client, student):
     import jwt
 
-    forged = jwt.encode({"sub": student["id"], "role": "professor"}, "wrong-secret", algorithm="HS256")
+    forged = jwt.encode({"sub": student["id"], "role": "professor"}, "wrong-secret-0123456789abcdef0123456789ab", algorithm="HS256")
     response = client.get("/api/v1/notifications", headers={"Authorization": f"Bearer {forged}"})
     assert response.status_code == 401
 
