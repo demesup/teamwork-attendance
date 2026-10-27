@@ -12,11 +12,12 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Resp
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .attendance_scan import router as attendance_scan_router
+from .attendance_scan import students_router
 from .config import get_settings
 from .db import Base, engine, ensure_additive_schema, get_db
 from .models import (
@@ -840,18 +841,22 @@ def student_statistics(
         enrollment.section_id: enrollment
         for enrollment in db.scalars(select(Enrollment).where(Enrollment.student_id == student.id)).all()
     }
-    sessions = db.scalars(
-        select(AttendanceSession)
-        .where(
-            AttendanceSession.section_id.in_(enrollments.keys()),
-            AttendanceSession.status != SessionStatus.CANCELLED,
-        )
-        .order_by(AttendanceSession.starts_at)
-    ).all()
     records = {
         record.attendance_session_id: record
         for record in db.scalars(select(AttendanceRecord).where(AttendanceRecord.student_id == student.id)).all()
     }
+    # Sessions of the student's classes, plus labs of other groups they were recorded at.
+    sessions = db.scalars(
+        select(AttendanceSession)
+        .where(
+            or_(
+                AttendanceSession.section_id.in_(enrollments.keys()),
+                AttendanceSession.id.in_(records.keys()),
+            ),
+            AttendanceSession.status != SessionStatus.CANCELLED,
+        )
+        .order_by(AttendanceSession.starts_at)
+    ).all()
     # A session counts once the student has a record for it, or once it has ended and they were enrolled at its start.
     sessions = [
         session
@@ -861,7 +866,9 @@ def student_statistics(
     ]
     section_names = {
         section.id: section.name
-        for section in db.scalars(select(CourseSection).where(CourseSection.id.in_(enrollments.keys()))).all()
+        for section in db.scalars(
+            select(CourseSection).where(CourseSection.id.in_({session.section_id for session in sessions}))
+        ).all()
     }
     by_session = [
         {
@@ -1215,6 +1222,7 @@ def mark_notifications_read(user: User = Depends(current_user), db: Session = De
 
 
 app.include_router(attendance_scan_router)
+app.include_router(students_router)
 
 # Registered last so every API route above takes precedence over the web UI's files.
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="ui")

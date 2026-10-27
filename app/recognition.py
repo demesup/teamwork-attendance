@@ -58,7 +58,9 @@ class RosterStudent:
     id: str
     name: str
     keys: tuple[str, ...]
-    group: str | None
+    # Group codes of every class the student is in ("1241EA"), and the class names.
+    groups: tuple[str, ...]
+    classes: tuple[str, ...]
 
 
 def fold(text: str) -> str:
@@ -73,12 +75,15 @@ def group_code(text: str) -> str | None:
     return match.group(0) if match else None
 
 
-def roster_student(student_id: str, first_name: str, last_name: str, section_name: str) -> RosterStudent:
+def roster_student(student_id: str, first_name: str, last_name: str, section_names: str | list[str]) -> RosterStudent:
+    classes = [section_names] if isinstance(section_names, str) else list(section_names)
+    groups = tuple(code for code in (group_code(name) for name in classes) if code)
     return RosterStudent(
         id=student_id,
         name=f"{last_name} {first_name}".strip(),
         keys=(fold(f"{last_name} {first_name}"), fold(f"{first_name} {last_name}")),
-        group=group_code(section_name),
+        groups=groups,
+        classes=tuple(classes),
     )
 
 
@@ -191,9 +196,11 @@ def row_number(text: str) -> int | None:
 
 
 def _group_adjustment(line_group: str | None, student: RosterStudent) -> float:
-    if line_group is None or student.group is None:
+    if line_group is None or not student.groups:
         return 0
-    return GROUP_BONUS if fuzz.ratio(line_group, student.group) >= 80 else -GROUP_BONUS
+    if any(fuzz.ratio(line_group, group) >= 80 for group in student.groups):
+        return GROUP_BONUS
+    return -GROUP_BONUS
 
 
 def match_names(lines: list[OcrLine], roster: list[RosterStudent]) -> dict:
@@ -229,7 +236,13 @@ def match_names(lines: list[OcrLine], roster: list[RosterStudent]) -> dict:
         taken_lines.add(line_index)
         taken_students.add(student_index)
         student = roster[student_index]
-        entry = {"student_id": student.id, "name": student.name, "score": round(score, 1), "line": lines[line_index].text}
+        entry = {
+            "student_id": student.id,
+            "name": student.name,
+            "classes": list(student.classes),
+            "score": round(score, 1),
+            "line": lines[line_index].text,
+        }
         (matched if score >= ACCEPT_SCORE else review).append(entry)
 
     unmatched = []
@@ -247,7 +260,12 @@ def match_names(lines: list[OcrLine], roster: list[RosterStudent]) -> dict:
                 {
                     "line": line.text,
                     "candidates": [
-                        {"student_id": roster[index].id, "name": roster[index].name, "score": round(score, 1)}
+                        {
+                            "student_id": roster[index].id,
+                            "name": roster[index].name,
+                            "classes": list(roster[index].classes),
+                            "score": round(score, 1),
+                        }
                         for score, index in per_line[line_index]
                     ],
                 }
@@ -285,7 +303,7 @@ def analyse(boxes: list[OcrBox], roster: list[RosterStudent], session_date: date
         # Roster students this part of the sheet did not name: the professor picks them for blank rows.
         named = {entry["student_id"] for entry in result["matched"]}
         named |= {entry["student_id"] for entry in result["review"] if "student_id" in entry}
-        result["unassigned"] = [{"student_id": s.id, "name": s.name} for s in roster if s.id not in named]
+        result["unassigned"] = [{"student_id": s.id, "name": s.name, "classes": list(s.classes)} for s in roster if s.id not in named]
         sessions.append({"label": label, **result})
     # Green: rows read with confidence. Red: rows that need a look, labelled with the best guess.
     confirmed_text: set[str] = set()

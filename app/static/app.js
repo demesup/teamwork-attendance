@@ -1032,6 +1032,12 @@ function absenceForm(stats, onSent) {
 
 async function renderProfessor() {
   state.sections = await api("/sections");
+  if (state.allStudents) {
+    const main = el("main", { class: "main" });
+    mount(topbar(), el("div", { class: "layout" }, professorSidebar(), main));
+    allStudentsPage(main);
+    return;
+  }
   if (!state.sectionId || !state.sections.some((section) => section.id === state.sectionId)) {
     state.sectionId = state.sections[0]?.id || null;
   }
@@ -1069,6 +1075,18 @@ function professorSidebar() {
     { class: "sidebar", "aria-label": "Classes" },
     el("h2", {}, "Classes"),
     el(
+      "button",
+      {
+        class: "all-students",
+        "aria-current": String(Boolean(state.allStudents)),
+        onclick: () => {
+          state.allStudents = true;
+          renderProfessor();
+        },
+      },
+      "All students",
+    ),
+    el(
       "ul",
       { class: "class-list" },
       state.sections.map((section) =>
@@ -1082,6 +1100,7 @@ function professorSidebar() {
               onclick: () => {
                 state.sectionId = section.id;
                 state.tab = "sessions";
+                state.allStudents = false;
                 renderProfessor();
               },
             },

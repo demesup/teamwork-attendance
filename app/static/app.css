@@ -494,3 +494,10 @@ dialog .row { margin-top: 20px; justify-content: flex-end; }
   .scan-result { grid-template-columns: 1fr; }
   .scan-photo { grid-row: auto; }
 }
+
+/* All students page */
+.all-students { display: block; width: 100%; text-align: left; margin: 0 0 12px; padding: 10px 12px; background: transparent; border: 1.5px solid var(--line-strong); border-radius: 10px; color: var(--ink); font-weight: 700; cursor: pointer; }
+.all-students[aria-current="true"] { border-color: var(--ink); }
+.all-student { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; align-items: center; }
+.all-student-classes { display: flex; flex-wrap: wrap; gap: 6px; }
+.class-tag { font-family: "JetBrains Mono", monospace; font-size: 0.8rem; padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: 999px; }

@@ -5,7 +5,8 @@ const SCAN_ACCEPT = "image/png,image/jpeg,.png,.jpg,.jpeg";
 const SCAN_MAX_BYTES = 5 * 1024 * 1024;
 
 async function scanView(section, host) {
-  const students = await api(`/sections/${section.id}/students`);
+  // Students can attend labs of other groups, so the list covers every student in the professor's classes.
+  const students = await api("/students");
   const status = el("p", { class: "muted", role: "status" }, "Take a straight, well-lit photo of the list. Nothing is saved until you approve the list.");
   const dateInput = el("input", { type: "date", "aria-label": "Date of the sheet" });
   const fileInput = el("input", { type: "file", accept: SCAN_ACCEPT, required: true, "aria-label": "Photo of the attendance sheet" });
@@ -99,7 +100,8 @@ function scanSession(section, students, part) {
   const title = part.label ? `Session ${part.label}` : "Sheet";
   const boxes = new Map();
   const picks = [];
-  const everyone = students.map((student) => ({ id: student.id, name: `${student.last_name} ${student.first_name}`.trim() }));
+  const everyoneOptions = students.map((student) => ({ id: student.id, name: withClasses(`${student.last_name} ${student.first_name}`.trim(), student.classes) }));
+  const everyone = students.map((student) => ({ id: student.id, name: `${student.last_name} ${student.first_name}`.trim(), classes: student.classes }));
 
   function checkbox(id, checked) {
     const input = el("input", { type: "checkbox" });
@@ -123,16 +125,16 @@ function scanSession(section, students, part) {
   // Rows the app could not place: each gets a dropdown that ticks the student the professor picks.
   const needsLook = [];
   for (const entry of part.review) {
-    const candidates = entry.candidates || [{ student_id: entry.student_id, name: entry.name }];
-    const options = candidates.map((candidate) => ({ id: candidate.student_id, name: candidate.name }));
+    const candidates = entry.candidates || [{ student_id: entry.student_id, name: entry.name, classes: entry.classes }];
+    const options = candidates.map((candidate) => ({ id: candidate.student_id, name: withClasses(candidate.name, candidate.classes) }));
     const top = options[0]?.id || "";
     needsLook.push(
-      el("li", {}, el("p", { class: "scan-line" }, `"${entry.line}"`), pickRow("Who is this?", options.length ? options : everyone, top)),
+      el("li", {}, el("p", { class: "scan-line" }, `"${entry.line}"`), pickRow("Who is this?", options.length ? options : everyoneOptions, top)),
     );
   }
   for (const entry of part.unnamed) {
     needsLook.push(
-      el("li", {}, el("p", { class: "scan-line" }, `Row ${entry.row} has no readable name`), pickRow("Who signed row " + entry.row + "?", everyone, "")),
+      el("li", {}, el("p", { class: "scan-line" }, `Row ${entry.row} has no readable name`), pickRow("Who signed row " + entry.row + "?", everyoneOptions, "")),
     );
   }
   for (const line of part.unmatched) {
@@ -153,6 +155,7 @@ function scanSession(section, students, part) {
         { class: "scan-check" },
         input,
         el("span", {}, person.name),
+        el("span", { class: "muted" }, person.classes.join(", ")),
         readIds.has(person.id) ? el("span", { class: "muted" }, "read from sheet") : null,
       ),
     );
@@ -179,4 +182,43 @@ function scanSession(section, students, part) {
       el("ul", { class: "list scan-list" }, rows),
     ),
   };
+}
+
+function withClasses(name, classes) {
+  return classes && classes.length ? `${name} (${classes.join(", ")})` : name;
+}
+
+// "All students": everyone in the professor's classes, searchable, with the classes each one is in.
+async function allStudentsPage(main) {
+  const students = await api("/students");
+  const search = el("input", { type: "search", placeholder: "Search by name or class", "aria-label": "Search students" });
+  const list = el("ul", { class: "list", id: "all-students-list" });
+
+  function draw() {
+    const query = search.value.trim().toLowerCase();
+    const shown = students.filter((student) => {
+      const text = `${student.last_name} ${student.first_name} ${student.classes.join(" ")}`.toLowerCase();
+      return text.includes(query);
+    });
+    list.replaceChildren(
+      ...(shown.length
+        ? shown.map((student) =>
+            el(
+              "li",
+              { class: "all-student" },
+              el("span", { class: "all-student-name" }, `${student.last_name} ${student.first_name}`.trim()),
+              el("span", { class: "all-student-classes" }, student.classes.map((name) => el("span", { class: "class-tag" }, name))),
+            ),
+          )
+        : [el("li", { class: "muted" }, "No student matches that search.")]),
+    );
+  }
+  search.addEventListener("input", draw);
+  draw();
+
+  fill(main,
+    el("div", { class: "page-head" }, el("div", {}, el("h1", {}, "All students"), el("p", { class: "muted" }, `${students.length} students in your classes`))),
+    el("div", { style: "margin-top:20px;max-width:520px" }, search),
+    el("div", { style: "margin-top:16px" }, list),
+  );
 }
