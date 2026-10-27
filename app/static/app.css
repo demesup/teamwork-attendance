@@ -473,3 +473,24 @@ dialog .row { margin-top: 20px; justify-content: flex-end; }
 @media (forced-colors: active) {
   .status::before, .timeline button, .split-bar > span { forced-color-adjust: none; border: 1px solid CanvasText; }
 }
+
+/* Scan sheet tab */
+.scan-controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-top: 12px; }
+.scan-controls label { display: grid; gap: 6px; font-weight: 600; }
+.scan-controls label > span { font-size: 0.9rem; }
+.scan-result { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.scan-photo { margin: 0; grid-row: span 3; }
+.scan-photo img { width: 100%; height: auto; border-radius: 10px; border: 1.5px solid var(--line); }
+.scan-photo figcaption { margin-top: 8px; }
+.scan-session h3 { margin: 0 0 10px; }
+.scan-session h4 { margin: 18px 0 10px; }
+.scan-look li { display: grid; gap: 6px; }
+.scan-look p { margin: 0; }
+.scan-line { font-family: "JetBrains Mono", monospace; font-size: 0.85rem; overflow-wrap: anywhere; }
+.scan-pick { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.scan-check { display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.scan-approve { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; grid-column: 1 / -1; }
+@media (max-width: 760px) {
+  .scan-result { grid-template-columns: 1fr; }
+  .scan-photo { grid-row: auto; }
+}

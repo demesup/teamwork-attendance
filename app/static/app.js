@@ -1102,6 +1102,7 @@ async function renderSection(main) {
 
   const tabsList = [
     ["sessions", "Attendance"],
+    ["scan", "Scan sheet"],
     ["students", "Students"],
     ["absences", "Absence requests", pending],
     ["stats", "Statistics"],
@@ -1142,7 +1143,7 @@ async function renderSection(main) {
     body,
   );
 
-  const views = { sessions: sessionsView, students: studentsView, absences: (item, host) => absencesView(item, host, absences), stats: statsView };
+  const views = { sessions: sessionsView, scan: scanView, students: studentsView, absences: (item, host) => absencesView(item, host, absences), stats: statsView };
   await views[state.tab](section, body);
 }
 

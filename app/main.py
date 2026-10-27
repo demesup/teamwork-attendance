@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from .attendance_scan import router as attendance_scan_router
 from .config import get_settings
 from .db import Base, engine, ensure_additive_schema, get_db
 from .models import (
@@ -1212,6 +1213,8 @@ def mark_notifications_read(user: User = Depends(current_user), db: Session = De
         notification.read_at = datetime.now(timezone.utc)
     db.commit()
 
+
+app.include_router(attendance_scan_router)
 
 # Registered last so every API route above takes precedence over the web UI's files.
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
