@@ -1,11 +1,22 @@
+import io
+
 import pytest
+from PIL import Image
 
 from app import attendance_scan
 from app.db import SessionLocal
 from app.models import AttendanceRecord, AttendanceSession
 from app.recognition import OcrBox
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"fake image body"
+
+
+def png(width: int = 4, height: int = 4) -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (width, height), (255, 255, 255)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+PNG = png()
 
 
 @pytest.fixture
@@ -55,6 +66,19 @@ def test_non_image_files_are_refused(client, professor, section, fake_ocr):
     assert fake_ocr == []
 
 
+def test_damaged_images_are_refused_without_a_server_error(client, professor, section, fake_ocr):
+    for content in (b"\x89PNG\r\n\x1a\n" + b"not really a png", PNG[: len(PNG) // 2]):
+        response = upload(client, section, professor, content=content)
+        assert response.status_code == 415, response.text
+    assert fake_ocr == []
+
+
+def test_images_with_too_many_pixels_are_refused(client, professor, section, fake_ocr, monkeypatch):
+    monkeypatch.setattr(attendance_scan, "MAX_SCAN_PIXELS", 10)
+    assert upload(client, section, professor, content=png(4, 4)).status_code == 413
+    assert fake_ocr == []
+
+
 def test_oversized_files_are_refused(client, professor, section, fake_ocr, monkeypatch):
     monkeypatch.setattr(attendance_scan, "get_settings", lambda: type("S", (), {"max_upload_bytes": 10})())
     assert upload(client, section, professor, content=PNG).status_code == 413
@@ -83,13 +107,7 @@ def test_confirm_records_each_session_and_rejects_unknown_students(client, profe
 
 
 def test_preview_can_return_the_photo_with_red_marks(client, professor, section, fake_ocr):
-    import io
-
-    from PIL import Image
-
-    buffer = io.BytesIO()
-    Image.new("RGB", (200, 150), (255, 255, 255)).save(buffer, format="PNG")
-    response = upload(client, section, professor, content=buffer.getvalue(), annotate_sheet="true")
+    response = upload(client, section, professor, content=png(200, 150), annotate_sheet="true")
     assert response.status_code == 200, response.text
     assert response.json()["annotated_image"].startswith("data:image/png;base64,")
     assert "flagged" not in response.json()

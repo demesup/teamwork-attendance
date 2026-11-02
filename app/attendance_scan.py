@@ -1,7 +1,9 @@
 import base64
+import io
 from datetime import date, datetime, time, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from PIL import Image
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -17,6 +19,8 @@ students_router = APIRouter(prefix="/api/v1", tags=["professor"])
 
 # Image types only: the sheet is read, never kept.
 IMAGE_SIGNATURES = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")
+# A phone photo is about 12 megapixels. A small PNG can declare a far larger canvas, which only costs memory.
+MAX_SCAN_PIXELS = 50_000_000
 
 
 class ScanConfirmSession(BaseModel):
@@ -46,6 +50,19 @@ def professor_students(db: Session, professor: User) -> list[tuple[User, list[st
     for student, class_name in rows:
         grouped.setdefault(student.id, (student, []))[1].append(class_name)
     return list(grouped.values())
+
+
+def check_photo(content: bytes) -> None:
+    """Refuse photos that cannot be decoded, or are too large to decode, before the OCR reads them."""
+    try:
+        with Image.open(io.BytesIO(content)) as picture:
+            if picture.width * picture.height > MAX_SCAN_PIXELS:
+                raise HTTPException(status_code=413, detail="The photo is too large. Use a photo of at most 50 megapixels.")
+            picture.load()
+    except Image.DecompressionBombError as exc:
+        raise HTTPException(status_code=413, detail="The photo is too large. Use a photo of at most 50 megapixels.") from exc
+    except (OSError, SyntaxError, ValueError) as exc:
+        raise HTTPException(status_code=415, detail="The photo could not be read. Upload a PNG or JPEG photo of the attendance sheet") from exc
 
 
 @students_router.get("/students")
@@ -88,6 +105,7 @@ def preview_scan(
         raise HTTPException(status_code=413, detail=f"File is too large. The limit is {limit // (1024 * 1024)} MB.")
     if not any(content.startswith(signature) for signature in IMAGE_SIGNATURES):
         raise HTTPException(status_code=415, detail="Upload a PNG or JPEG photo of the attendance sheet")
+    check_photo(content)
     roster = [
         roster_student(student.id, student.first_name, student.last_name, classes)
         for student, classes in professor_students(db, professor)
