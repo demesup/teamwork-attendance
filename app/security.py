@@ -50,7 +50,7 @@ def code_matches(code: str, expected: str) -> bool:
 
 
 def make_qr_token(session_id: str, code_version: int, session_expires_at: datetime) -> tuple[str, datetime]:
-    """Signed, short-lived, single-use QR token. Returns the token and its expiry."""
+    """Signed, short-lived QR token. Returns the token and its expiry."""
     issued_at = datetime.now(timezone.utc)
     expires = min(issued_at + timedelta(seconds=get_settings().qr_ttl_seconds), session_expires_at)
     claims = {

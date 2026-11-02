@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -88,10 +88,7 @@ class AttendanceSession(Base):
 
 class AttendanceRecord(Base):
     __tablename__ = "attendance_records"
-    __table_args__ = (
-        UniqueConstraint("attendance_session_id", "student_id"),
-        Index("ux_attendance_records_qr_nonce", "qr_nonce", unique=True),
-    )
+    __table_args__ = (UniqueConstraint("attendance_session_id", "student_id"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     attendance_session_id: Mapped[str] = mapped_column(ForeignKey("attendance_sessions.id"), index=True)
     student_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)

@@ -61,7 +61,5 @@ def ensure_additive_schema() -> None:
             for column, sql_type in columns.items():
                 if column not in existing:
                     connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))
-        # create_all only builds indexes for new tables, so add the QR-nonce uniqueness here too.
-        connection.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS ux_attendance_records_qr_nonce ON attendance_records (qr_nonce)")
-        )
+        # Older databases made QR tokens single-use with this index; one token now serves the whole class.
+        connection.execute(text("DROP INDEX IF EXISTS ux_attendance_records_qr_nonce"))

@@ -77,7 +77,7 @@ letters is rejected. The student UI should uppercase the input before sending it
 | Attempt logging | Implemented | Every accepted, invalid, or not-enrolled attempt is written to `attendance_code_attempts` |
 | Rate limiting | Implemented | Failed attempts (`invalid`, `not_enrolled`) are counted per student, per client IP, and per device within a sliding window (default 10 min). Going over a limit returns `429` and logs a `rate_limited` attempt. Limits: 5 per student, 30 per IP, 30 per device |
 | IP and device check | Implemented | Each attempt stores the client IP and an optional `X-Device-Id` header. One device can confirm for only one student per session (`409` otherwise) |
-| One-time QR token | Implemented | Each QR token carries a random nonce and expires after 30 s (`QR_TTL_SECONDS`). The nonce is saved on the attendance record with a unique index, so a token works for one student only. The professor refreshes the QR with `POST .../qr-token` |
+| Short-lived QR token | Implemented | Each QR token carries a random nonce and expires after 30 s (`QR_TTL_SECONDS`). Every student in the room can scan the same QR until it expires; the nonce is saved on the attendance record. The professor refreshes the QR with `POST .../qr-token` |
 | Code rotation | Implemented | `POST .../rotate-code` issues a new code and increments `code_version`. The old code and any QR tokens issued before the rotation stop working |
 
 **What to say:** the window is short, each student can count only once, and
@@ -155,7 +155,7 @@ endpoint enforces.
 | POST | `/attendance-sessions/{session_id}/close` | professor | End attendance early; still counts in statistics |
 | POST | `/attendance-sessions` | professor | Open attendance. Returns `code`, `qr_token`, `expires_at` |
 | POST | `/attendance-sessions/{session_id}/confirm` | student | Submit `code` or `qr_token` (plus location if required) |
-| POST | `/attendance-sessions/{session_id}/qr-token` | professor | Issue a fresh single-use QR token (valid 30 s). Call repeatedly to refresh the QR on screen |
+| POST | `/attendance-sessions/{session_id}/qr-token` | professor | Issue a fresh QR token (valid 30 s). Call repeatedly to refresh the QR on screen |
 | POST | `/attendance-sessions/{session_id}/rotate-code` | professor | Replace the session code. Returns the new code and a QR token. Old codes and QR tokens stop working |
 | POST | `/attendance-sessions/{session_id}/cancel` | professor | Cancel an open session. Notifies enrolled students |
 | POST | `/absence-requests` | student | Submit an excused-absence request |

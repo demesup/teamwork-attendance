@@ -10,7 +10,7 @@ from app.models import AttendanceRecord, AttendanceSession, AuditLog, CodeAttemp
 from tests.helpers import confirm, enroll, make_actor, open_session
 
 
-# ---------- One-time QR tokens ----------
+# ---------- Short-lived QR tokens ----------
 
 
 def test_qr_token_confirms_attendance_once(client, professor, section, student):
@@ -20,12 +20,20 @@ def test_qr_token_confirms_attendance_once(client, professor, section, student):
     assert response.json()["confirmation_method"] == "qr"
 
 
-def test_same_qr_token_cannot_be_used_by_a_second_student(client, professor, section, student, other_student):
+def test_whole_class_can_scan_the_same_qr_token(client, professor, section, student, other_student, db):
     body = open_session(client, professor, section)
     assert confirm(client, student, body["id"], qr_token=body["qr_token"]).status_code == 200
-    response = confirm(client, other_student, body["id"], qr_token=body["qr_token"])
+    assert confirm(client, other_student, body["id"], qr_token=body["qr_token"]).status_code == 200
+    failures = db.query(CodeAttempt).filter(CodeAttempt.result != "accepted").count()
+    assert failures == 0
+
+
+def test_same_qr_token_confirms_a_student_only_once(client, professor, section, student):
+    body = open_session(client, professor, section)
+    assert confirm(client, student, body["id"], qr_token=body["qr_token"]).status_code == 200
+    response = confirm(client, student, body["id"], qr_token=body["qr_token"])
     assert response.status_code == 409
-    assert response.json()["detail"] == "QR code has already been used"
+    assert response.json()["detail"] == "Attendance already confirmed"
 
 
 def test_refreshed_qr_token_works_for_each_student(client, professor, section, student, other_student):

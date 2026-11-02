@@ -847,7 +847,6 @@ function confirmErrorMessage(error, viaQr) {
     case 410:
       return "Attendance for this class has ended.";
     case 409:
-      if (detail.includes("qr")) return "That QR was already used. Scan the new one on the board, or type the code.";
       if (detail.includes("device")) return "This device was already used to mark another student present. Use your own phone or computer.";
       return error.message;
     case 429:

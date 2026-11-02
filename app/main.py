@@ -189,7 +189,7 @@ def reject_attempt(
 
 
 def qr_nonce_for(token: str, session: AttendanceSession) -> str | None:
-    """Return the token's one-time nonce if it is a valid, unexpired QR token for the current code version."""
+    """Return the token's nonce if it is a valid, unexpired QR token for the current code version."""
     try:
         claims = jwt.decode(token, get_settings().code_secret, algorithms=["HS256"])
     except jwt.InvalidTokenError:
@@ -452,7 +452,7 @@ def refresh_qr_token(
     professor: User = Depends(require_role("professor")),
     db: Session = Depends(get_db),
 ) -> QrTokenResponse:
-    """Issue a fresh single-use QR token. Call again to refresh the QR shown on screen."""
+    """Issue a fresh short-lived QR token. Call again to refresh the QR shown on screen."""
     session = db.get(AttendanceSession, session_id)
     if session is None or session.opened_by != professor.id:
         raise HTTPException(status_code=404, detail="Attendance session not found")
@@ -528,10 +528,8 @@ def confirm_attendance(
     qr_nonce = qr_nonce_for(payload.qr_token, session) if payload.qr_token else None
     if not code_ok and qr_nonce is None:
         reject_attempt(db, session, student.id, "invalid", ip, device_id, 400, "Invalid attendance code or QR")
-    # A valid QR is single-use: its nonce may appear on one record only.
+    # The whole class scans the same QR from the board, so a token works for every student until it expires.
     method = "qr" if qr_nonce else "code"
-    if qr_nonce and db.scalar(select(AttendanceRecord.id).where(AttendanceRecord.qr_nonce == qr_nonce)):
-        reject_attempt(db, session, student.id, "invalid", ip, device_id, 409, "QR code has already been used")
     location_required = session.location_latitude is not None
     if location_required and (payload.latitude is None or payload.longitude is None):
         raise HTTPException(status_code=422, detail="Location is required for this attendance session")

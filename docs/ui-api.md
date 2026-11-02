@@ -77,9 +77,9 @@ temporary `code` (10 characters, without look-alikes such as 0/O or 1/I), signed
 or turn the token into a QR image in the UI. Do not persist either value in
 browser storage.
 
-The QR token is single-use and expires after 30 seconds. Refresh it about every
-20 seconds with `POST /api/v1/attendance-sessions/{session_id}/qr-token`, which
-returns a new `qr_token` and `expires_at`. The typed `code` stays valid until the
+The QR token works for every student and expires after 30 seconds. Refresh it
+about every 20 seconds with `POST /api/v1/attendance-sessions/{session_id}/qr-token`,
+which returns a new `qr_token` and `expires_at`. The typed `code` stays valid until the
 session ends or is rotated.
 
 To invalidate a code that has been shared, call
@@ -121,8 +121,8 @@ why it is used. Never trust client coordinates for anything other than the
 server-side radius check.
 
 Display success only after the API returns `200`. Handle `400` as invalid,
-`403` as not enrolled or outside the location, `409` as already confirmed, used
-QR, or a device already used by another student, `410` as expired, and `429` as
+`403` as not enrolled or outside the location, `409` as already confirmed or a
+device already used by another student, `410` as expired, and `429` as
 too many failed attempts.
 
 ## Absence requests and cancellation notifications
