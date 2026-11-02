@@ -26,9 +26,14 @@ ROW_NUMBER = re.compile(r"\W*(\d{1,2})\s*[\)\.]")
 GROUP_BONUS = 3
 # Words printed on the sheet that are never names.
 STOPWORDS = {"nume", "prenume", "grupa", "data", "semnatura", "prezenta", "nr", "crt", "erasmus", "sesiunea", "sesiune", "ora"}
+# Whole words only: matching on the first three letters read names such as "3) Marin" or "5) Iulian" as dates.
 MONTHS = {
     "ian": 1, "jan": 1, "feb": 2, "mar": 3, "apr": 4, "mai": 5, "may": 5, "iun": 6, "jun": 6,
-    "iul": 7, "jul": 7, "aug": 8, "sep": 9, "oct": 10, "noi": 11, "nov": 11, "dec": 12,
+    "iul": 7, "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "noi": 11, "nov": 11, "dec": 12,
+    "ianuarie": 1, "january": 1, "februarie": 2, "february": 2, "martie": 3, "march": 3,
+    "aprilie": 4, "april": 4, "iunie": 6, "june": 6, "iulie": 7, "july": 7, "august": 8,
+    "septembrie": 9, "september": 9, "octombrie": 10, "october": 10, "noiembrie": 11,
+    "november": 11, "decembrie": 12, "december": 12,
 }
 GROUP_TOKEN = re.compile(r"\d{3,4}[a-z]{0,2}")
 SESSION_MARKER = re.compile(r"s\s*([12])")
@@ -158,15 +163,16 @@ def session_marker(line: OcrLine) -> str | None:
 def find_date(lines: list[OcrLine], default_year: int) -> date | None:
     """Accepts 26.10.2026 and '26 Oct' (year defaults to the current one). Returns None when nothing matches."""
     for line in lines:
-        numeric = NUMERIC_DATE.search(line.text)
-        if numeric:
+        for numeric in NUMERIC_DATE.finditer(line.text):
             day, month, year = (int(part) for part in numeric.groups())
-            year = year + 2000 if year < 100 else year
-            return _valid_date(year, month, day)
+            found = _valid_date(year + 2000 if year < 100 else year, month, day)
+            if found:
+                return found
         for word in WORD_DATE.finditer(fold(line.text)):
-            month = MONTHS.get(word.group(2)[:3])
-            if month:
-                return _valid_date(default_year, month, int(word.group(1)))
+            month = MONTHS.get(word.group(2))
+            found = _valid_date(default_year, month, int(word.group(1))) if month else None
+            if found:
+                return found
     return None
 
 

@@ -92,6 +92,17 @@ def test_dates_are_read_from_numeric_or_month_name_text():
     assert find_date(group_into_lines([box("nothing here", 0, 10)]), 2026) is None
 
 
+def test_names_that_start_like_months_are_not_dates():
+    rows = [box("3) Marin Andrei", 0, 10), box("5) Iulian Pop", 0, 40), box("7) Decebal Ion", 0, 70)]
+    assert find_date(group_into_lines(rows), 2026) is None
+    assert find_date(group_into_lines(rows + [box("2 noiembrie", 0, 100)]), 2026) == date(2026, 11, 2)
+
+
+def test_an_impossible_date_does_not_hide_a_real_one():
+    rows = [box("Grupa 1241EA 31.02.2026", 0, 10), box("2.11.2026", 0, 40)]
+    assert find_date(group_into_lines(rows), 2026) == date(2026, 11, 2)
+
+
 def test_numbered_rows_without_a_name_are_reported_and_gaps_are_listed():
     lines = group_into_lines(
         [
