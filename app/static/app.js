@@ -84,6 +84,14 @@ function clearTimers() {
   state.timers.clear();
 }
 
+// Views drawn over the page, outside #app, register how to take themselves down so signing out removes them.
+const overlays = new Set();
+
+function closeOverlays() {
+  for (const close of [...overlays]) close();
+  document.querySelector(".popover")?.remove();
+}
+
 let toastTimer;
 function toast(message) {
   const node = document.getElementById("toast");
@@ -215,6 +223,7 @@ async function api(path, { method = "GET", json, form, files, headers = {} } = {
     const error = new ApiError(response.status, describeDetail(body.detail));
     if (response.status === 401 && state.user && !path.startsWith("/auth/")) {
       state.user = null;
+      closeOverlays();
       renderAuth("Your sign-in expired. Sign in again to continue.");
     }
     throw error;
@@ -497,7 +506,7 @@ async function signOut() {
   state.user = null;
   state.sections = [];
   state.sectionId = null;
-  document.querySelector(".popover")?.remove();
+  closeOverlays();
   renderAuth("You're signed out.");
 }
 
@@ -1557,11 +1566,16 @@ function openBoard(section, sessionId, code, expiresAt, firstQr) {
     else board.requestFullscreen?.();
   }
 
-  function close() {
+  function remove() {
     clearTimers();
     document.removeEventListener("keydown", onKey);
     if (document.fullscreenElement) document.exitFullscreen();
     board.remove();
+    overlays.delete(remove);
+  }
+
+  function close() {
+    remove();
     renderProfessor();
   }
 
@@ -1570,6 +1584,7 @@ function openBoard(section, sessionId, code, expiresAt, firstQr) {
   }
 
   document.body.append(board);
+  overlays.add(remove);
   document.addEventListener("keydown", onKey);
   drawQr(firstQr);
   tick();
