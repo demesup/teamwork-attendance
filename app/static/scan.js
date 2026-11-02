@@ -161,11 +161,16 @@ function scanSession(section, students, part) {
     );
   });
 
-  // The dropdowns drive the checkboxes: picking a student ticks them.
+  // The dropdowns drive the checkboxes: picking a student ticks them, and the student picked before
+  // is unticked unless the sheet read them or another dropdown still picks them.
   for (const select of picks) {
+    let previous = select.value;
     select.addEventListener("change", () => {
       const input = boxes.get(select.value);
       if (input) input.checked = true;
+      const stillPicked = picks.some((other) => other.value === previous);
+      if (previous && !readIds.has(previous) && !stillPicked && boxes.has(previous)) boxes.get(previous).checked = false;
+      previous = select.value;
     });
     if (select.value && boxes.has(select.value)) boxes.get(select.value).checked = true;
   }
